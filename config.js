@@ -5,5 +5,5 @@
    vous la demandera au premier lancement.
    ===================================================================== */
 window.BM_CONFIG = {
-  API_URL: ''
+  API_URL: 'https://script.google.com/macros/s/AKfycbym4q9l3jFVzreNl0Q8AfHfFU39RmvrrhBMioO7O-kMIUeMaThwdLKBMcFEN-ed73A/exec'
 };
