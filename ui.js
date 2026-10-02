@@ -65,6 +65,7 @@ var UI = window.UI = (function () {
   function go(view, opts) {
     S.view = view; S.opts = opts || {};
     if (opts && opts.tab) { if (view === 'avenir') S.avTab = opts.tab; if (view === 'plus') S.plusTab = opts.tab; }
+    if (opts && opts.cptF) S.cptF = opts.cptF;
     if (opts && opts.cat && view === 'ops') S.opsF = { m: S.month, cat: opts.cat };
     render(true);
     if (opts && opts.cat && view === 'budget') setTimeout(function () { catSheet(opts.cat); }, 50);
@@ -144,10 +145,11 @@ var UI = window.UI = (function () {
       S.data.comptes.forEach(function (c) { if (!c.actif) return; if (c.nature === 'Épargne') epa += S.balances[c.nom]; else cour += S.balances[c.nom]; });
       var dt = A.debt(), todo = S.ops.filter(function (o) { return o.cat.indexOf('À classer') === 0 && o.m >= BM.addMonths(BM.ym(S.today), -12); }).length;
       out += '<section class="card span"><div class="tiles t4">' +
-        tile('Comptes courants', eur0(cour), 'solde estimé aujourd\'hui', '', 'go-comptes') +
-        tile('Épargne', eur0(epa), 'livrets suivis', '', 'go-comptes') +
+        tile('Comptes courants', eur0(cour), 'solde estimé aujourd\'hui', '', 'go-courants') +
+        tile('Épargne', eur0(epa), 'livrets suivis', '', 'go-epargne') +
         tile("Taux d'effort", dt.effort == null ? '–' : A.pct(dt.effort), 'seuil ' + (P.seuilEffort || 35) + ' %', dt.effort * 100 > (P.seuilEffort || 35) ? 'bad' : 'good', 'go-prets') +
-        tile('À classer', String(todo), todo ? 'opérations (12 mois)' : 'tout est classé 👌', todo ? 'warn' : 'good', 'go-tri') + '</div></section>';
+        tile('À classer', String(todo), todo ? 'opérations (12 mois)' : 'tout est classé 👌', todo ? 'warn' : 'good', 'go-tri') + '</div>' +
+        '<div class="row between mt8" data-tile="go-tous" style="cursor:pointer"><span class="small ink2">Total comptes courants + épargne</span><b class="num ' + (cour + epa < 0 ? 'bad' : '') + '">' + eur0(cour + epa) + ' ›</b></div></section>';
       // Trésorerie
       var pr = A.projection();
       out += '<section class="card"><div class="card-head"><h2>Trésorerie prévue · ' + (pr.days.length - 1) + ' jours</h2><button class="link" data-go="avenir">Détail ›</button></div>' +
@@ -179,7 +181,7 @@ var UI = window.UI = (function () {
       bindCommon();
       var all = $('#allsg'); if (all) all.onclick = allSuggestions;
       $$('[data-sg]').forEach(function (b) { b.onclick = function () { suggDetail(A.suggestions()[+b.dataset.sg]); }; });
-      var tiles = { 'go-treso': ['avenir', { tab: 'treso' }], 'go-comptes': ['plus', { tab: 'comptes' }], 'go-prets': ['avenir', { tab: 'prets' }] };
+      var tiles = { 'go-treso': ['avenir', { tab: 'treso' }], 'go-comptes': ['plus', { tab: 'comptes', cptF: 'tous' }], 'go-courants': ['plus', { tab: 'comptes', cptF: 'Courant' }], 'go-epargne': ['plus', { tab: 'comptes', cptF: 'Épargne' }], 'go-tous': ['plus', { tab: 'comptes', cptF: 'tous' }], 'go-prets': ['avenir', { tab: 'prets' }] };
       $$('[data-tile]').forEach(function (t) { t.onclick = function () { var k = t.dataset.tile; if (k === 'go-tri') triExpress(); else go(tiles[k][0], tiles[k][1]); }; });
     }
   };

@@ -596,21 +596,27 @@ var UI2 = window.UI2 = (function () {
 
   /* ---------------- Comptes ---------------- */
   function comptes() {
-    var out = '<section class="card"><div class="card-head"><h2>Vos comptes</h2><button class="btn sm" id="addc">＋ Compte</button></div>';
-    var tc = 0, te = 0;
-    out += S.data.comptes.map(function (c) {
+    var f = S.cptF || 'tous', tc = 0, te = 0;
+    S.data.comptes.forEach(function (c) { if (c.actif) { if (c.nature === 'Épargne') te += S.balances[c.nom]; else tc += S.balances[c.nom]; } });
+    var titre = f === 'Courant' ? 'Comptes courants' : f === 'Épargne' ? 'Comptes épargne' : 'Vos comptes';
+    var out = '<section class="card"><div class="card-head"><h2>' + titre + '</h2><button class="btn sm" id="addc">＋ Compte</button></div>' +
+      '<div class="chips">' + [['tous', 'Tous · ' + eur0(tc + te)], ['Courant', '💳 Courants · ' + eur0(tc)], ['Épargne', '🐷 Épargne · ' + eur0(te)]].map(function (x) {
+        return '<button class="chip' + (f === x[0] ? ' on' : '') + '" data-cptf="' + x[0] + '"' + (f === x[0] ? ' style="font-weight:700;outline:2px solid var(--s1)"' : '') + '>' + x[1] + '</button>'; }).join('') + '</div>';
+    out += S.data.comptes.filter(function (c) { return f === 'tous' || (f === 'Épargne') === (c.nature === 'Épargne'); }).map(function (c) {
       var b = S.balances[c.nom], l = S.fresh[c.nom];
-      if (c.actif) { if (c.nature === 'Épargne') te += b; else tc += b; }
       var h = A.lastMonths(12, BM.addMonths(BM.ym(S.today), 1)).reverse().map(function (m) { return BM.balanceAt(c, BM.dayOf(m, 31) > S.today ? S.today : BM.dayOf(m, 31), S.ops); });
       return '<div class="loan" data-cpt="' + esc(c.nom) + '" style="' + (c.actif ? '' : 'opacity:.5') + '"><div class="row between"><div class="grow"><div class="b">' + (c.nature === 'Épargne' ? '🐷 ' : '💳 ') + esc(c.nom) + '</div>' +
         '<div class="small muted">' + esc(c.titulaire) + (c.origine && /v3|recaler/i.test(c.origine) ? ' · <span class="warn">solde à confirmer</span>' : '') + ' · relevé au ' + (l ? A.dateLabel(l, true) : '–') + ' · réf. ' + eur(c.soldeRef) + ' au ' + (c.dateRef ? A.dateLabel(c.dateRef, true) : '–') + '</div></div>' +
         '<div style="text-align:right"><div class="b num ' + (b < 0 ? 'bad' : '') + '">' + eur(b) + '</div>' + Charts.spark(h, b < 0 ? 'var(--bad)' : 'var(--s1)', 90, 24) + '</div></div></div>';
     }).join('');
-    out += '<div class="tiles mt12">' + U().tile('Total comptes courants', eur0(tc), 'estimé aujourd\'hui') + U().tile('Total épargne', eur0(te), 'livrets suivis') + '</div>' +
+    out += (f === 'Courant' ? '<div class="tiles mt12">' + U().tile('Total comptes courants', eur0(tc), 'estimé aujourd\'hui') + '</div>'
+      : f === 'Épargne' ? '<div class="tiles mt12">' + U().tile('Total épargne', eur0(te), 'livrets suivis') + '</div>'
+      : '<div class="tiles t3 mt12">' + U().tile('Comptes courants', eur0(tc), 'estimé aujourd\'hui') + U().tile('Épargne', eur0(te), 'livrets suivis') + U().tile('Courants + épargne', eur0(tc + te), 'total général', tc + te < 0 ? 'bad' : '') + '</div>') +
       '<p class="small ink2 mt12">Le solde est calculé à partir d\'un <b>solde de référence</b> (montant et date) et des opérations importées. S\'il diffère de votre banque, touchez le compte puis « Recaler » en saisissant le solde affiché par la banque.</p></section>';
     return out;
   }
   function mountComptes() {
+    $$('[data-cptf]').forEach(function (b) { b.onclick = function () { S.cptF = b.dataset.cptf; U().render(true); }; });
     $$('[data-cpt]').forEach(function (b) { b.onclick = function () { compteSheet(b.dataset.cpt); }; });
     $('#addc').onclick = function () { compteSheet(null); };
   }
