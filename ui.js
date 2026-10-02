@@ -144,7 +144,7 @@ var UI = window.UI = (function () {
       S.data.comptes.forEach(function (c) { if (!c.actif) return; if (c.nature === 'Épargne') epa += S.balances[c.nom]; else cour += S.balances[c.nom]; });
       var dt = A.debt(), todo = S.ops.filter(function (o) { return o.cat.indexOf('À classer') === 0 && o.m >= BM.addMonths(BM.ym(S.today), -12); }).length;
       out += '<section class="card span"><div class="tiles t4">' +
-        tile('Comptes courants', eur0(cour), 'solde estimé aujourd\'hui', '', 'go-treso') +
+        tile('Comptes courants', eur0(cour), 'solde estimé aujourd\'hui', '', 'go-comptes') +
         tile('Épargne', eur0(epa), 'livrets suivis', '', 'go-comptes') +
         tile("Taux d'effort", dt.effort == null ? '–' : A.pct(dt.effort), 'seuil ' + (P.seuilEffort || 35) + ' %', dt.effort * 100 > (P.seuilEffort || 35) ? 'bad' : 'good', 'go-prets') +
         tile('À classer', String(todo), todo ? 'opérations (12 mois)' : 'tout est classé 👌', todo ? 'warn' : 'good', 'go-tri') + '</div></section>';
