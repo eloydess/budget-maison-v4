@@ -150,6 +150,11 @@ var UI = window.UI = (function () {
         tile("Taux d'effort", dt.effort == null ? '–' : A.pct(dt.effort), 'seuil ' + (P.seuilEffort || 35) + ' %', dt.effort * 100 > (P.seuilEffort || 35) ? 'bad' : 'good', 'go-prets') +
         tile('À classer', String(todo), todo ? 'opérations (12 mois)' : 'tout est classé 👌', todo ? 'warn' : 'good', 'go-tri') + '</div>' +
         '<div class="row between mt8" data-tile="go-tous" style="cursor:pointer"><span class="small ink2">Total comptes courants + épargne</span><b class="num ' + (cour + epa < 0 ? 'bad' : '') + '">' + eur0(cour + epa) + ' ›</b></div></section>';
+      // v5 : gagne-t-on du terrain ?
+      var pl = A.pilotage();
+      out += '<section class="card span verdict ' + pl.verdict + '" data-tile="go-pilotage" style="cursor:pointer"><div class="card-head"><h2>🧭 Gagne-t-on du terrain ?</h2><span class="tag ' + pl.verdict + '">' + ({ good: 'Oui', warn: 'En partie', bad: 'Non, pas encore' })[pl.verdict] + ' ›</span></div>' +
+        pl.sig.map(function (g) { return '<div class="sig"><span class="sig-i ' + (g.ok == null ? '' : g.ok ? 'good' : 'bad') + '">' + (g.ok == null ? '–' : g.ok ? '✓' : '✗') + '</span><div><b>' + esc(g.k) + '</b><div class="small ink2">' + esc(g.txt) + '</div></div></div>'; }).join('') +
+        (pl.open[0] ? '<p class="small mt8">Prochain levier : <b>' + esc(pl.open[0].levier) + '</b>' + (pl.open[0].gain ? ' (' + eur0(pl.open[0].gain) + ' / mois visés)' : '') + (pl.dus.length ? ' · <span class="warn">⏰ ' + pl.dus.length + ' point(s) de retour dus</span>' : '') + '</p>' : '') + '</section>';
       // Trésorerie
       var pr = A.projection();
       out += '<section class="card"><div class="card-head"><h2>Trésorerie prévue · ' + (pr.days.length - 1) + ' jours</h2><button class="link" data-go="avenir">Détail ›</button></div>' +
@@ -181,7 +186,7 @@ var UI = window.UI = (function () {
       bindCommon();
       var all = $('#allsg'); if (all) all.onclick = allSuggestions;
       $$('[data-sg]').forEach(function (b) { b.onclick = function () { suggDetail(A.suggestions()[+b.dataset.sg]); }; });
-      var tiles = { 'go-treso': ['avenir', { tab: 'treso' }], 'go-comptes': ['plus', { tab: 'comptes', cptF: 'tous' }], 'go-courants': ['plus', { tab: 'comptes', cptF: 'Courant' }], 'go-epargne': ['plus', { tab: 'comptes', cptF: 'Épargne' }], 'go-tous': ['plus', { tab: 'comptes', cptF: 'tous' }], 'go-prets': ['avenir', { tab: 'prets' }] };
+      var tiles = { 'go-treso': ['avenir', { tab: 'treso' }], 'go-comptes': ['plus', { tab: 'comptes', cptF: 'tous' }], 'go-courants': ['plus', { tab: 'comptes', cptF: 'Courant' }], 'go-epargne': ['plus', { tab: 'comptes', cptF: 'Épargne' }], 'go-tous': ['plus', { tab: 'comptes', cptF: 'tous' }], 'go-prets': ['avenir', { tab: 'prets' }], 'go-pilotage': ['avenir', { tab: 'pilotage' }] };
       $$('[data-tile]').forEach(function (t) { t.onclick = function () { var k = t.dataset.tile; if (k === 'go-tri') triExpress(); else go(tiles[k][0], tiles[k][1]); }; });
     }
   };

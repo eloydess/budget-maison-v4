@@ -82,19 +82,22 @@ var App = window.App = (function () {
   /** Montant « budgétaire » : positif = sortie pour Dépense/Épargne/Projet, positif = entrée pour Recette. */
   function amt(o) { return o.type === 'Recette' ? o.mt : (o.type === 'Transfert' ? 0 : -o.mt); }
 
+  /** Catégories qui portent les remboursements de prêts et l'assurance emprunteur (charges de crédit). */
+  var LOAN_CATS = ['Loyer / Crédit immobilier', 'Remboursement crédit conso', 'Crédit / Location véhicule', 'Assurance emprunteur'];
   function recompute() {
     var st = {}, last = {};
     S.ops.forEach(function (o) {
       if (!last[o.compte] || o.date > last[o.compte]) last[o.compte] = o.date;
-      var M = st[o.m] || (st[o.m] = { rec: 0, recReg: 0, recExc: 0, esp: 0, dep: 0, depFixe: 0, depVar: 0, epa: 0, proj: 0, cca: 0, cats: {}, groups: {}, n: 0, todo: 0 });
+      var M = st[o.m] || (st[o.m] = { rec: 0, recReg: 0, recExc: 0, esp: 0, dep: 0, depFixe: 0, depVar: 0, epa: 0, proj: 0, cca: 0, loan: 0, proc: 0, cats: {}, groups: {}, n: 0, todo: 0 });
       M.n++;
       if (BM.isUnclassified(o.cat)) M.todo++;
       var a = amt(o);
       if (o.type === 'Recette') { M.rec += a; if (BM.isRegularIncome(o.lib, o.cat, S.catMap)) M.recReg += a; else { M.recExc += a; if (BM.norm(o.lib).indexOf('VERSEMENT') !== -1) M.esp += a; } }
-      else if (o.type === 'Dépense') { M.dep += a; if (o.nature === 'Fixe') M.depFixe += a; else M.depVar += a; M.groups[o.groupe] = (M.groups[o.groupe] || 0) + a; }
+      else if (o.type === 'Dépense') { M.dep += a; if (LOAN_CATS.indexOf(o.cat) !== -1) M.loan += a; if (o.nature === 'Fixe') M.depFixe += a; else M.depVar += a; M.groups[o.groupe] = (M.groups[o.groupe] || 0) + a; }
       else if (o.type === 'Épargne') M.epa += a;
       else if (o.type === 'Projet') M.proj += a;
       else if (o.type === 'Transfert' && o.cat === "Compte courant d'associé") M.cca -= o.mt;
+      if ((o.type === 'Dépense' || o.type === 'Projet') && /^13/.test(o.groupe || '')) M.proc += a;
       if (o.type !== 'Transfert') M.cats[o.cat] = (M.cats[o.cat] || 0) + a;
     });
     S.stats = st; S.lastDate = last;
@@ -108,7 +111,7 @@ var App = window.App = (function () {
     S.data.prets.forEach(function (p) { S.loanSt[p.id] = BM.loanStatus(p, S.today, S.ops); });
     S._cache = {};
   }
-  function M(m) { return S.stats[m] || { rec: 0, recReg: 0, recExc: 0, esp: 0, dep: 0, depFixe: 0, depVar: 0, epa: 0, proj: 0, cca: 0, cats: {}, groups: {}, n: 0, todo: 0 }; }
+  function M(m) { return S.stats[m] || { rec: 0, recReg: 0, recExc: 0, esp: 0, dep: 0, depFixe: 0, depVar: 0, epa: 0, proj: 0, cca: 0, loan: 0, proc: 0, cats: {}, groups: {}, n: 0, todo: 0 }; }
   /** Mois complets précédant le mois courant (n derniers). */
   function lastMonths(n, from) { var out = [], cur = from || BM.ym(S.today); for (var i = 1; i <= n; i++) out.push(BM.addMonths(cur, -i)); return out; }
   function median(a) { if (!a.length) return 0; var s = a.slice().sort(function (x, y) { return x - y; }), k = Math.floor(s.length / 2); return s.length % 2 ? s[k] : (s[k - 1] + s[k]) / 2; }
@@ -306,9 +309,84 @@ var App = window.App = (function () {
      (revenus réguliers − sorties, moyenne des 3 derniers mois complets). */
   function autonomy() {
     var pat = 0; S.data.comptes.forEach(function (c) { if (c.actif) pat += S.balances[c.nom] || 0; });
-    var ms = lastMonths(3), socle = avg(ms.map(function (m) { return M(m).recReg; })), sorties = avg(ms.map(function (m) { return M(m).dep + M(m).epa; }));
+    var ms = lastMonths(3), socle = avg(ms.map(function (m) { return M(m).recReg; })), sorties = avg(ms.map(function (m) { return M(m).dep + M(m).proj + Math.max(0, M(m).cca); })); // v5 : l'épargne reste dans le patrimoine, elle n'est plus comptée comme sortie
     var deficit = socle - sorties;
     return { patrimoine: BM.r2(pat), socle: BM.r2(socle), sorties: BM.r2(sorties), deficit: BM.r2(deficit), mois: deficit < 0 && pat > 0 ? pat / -deficit : null };
+  }
+
+  /* ---------------- Pilotage v5 : « gagne-t-on du terrain ? » ----------------
+     Chaque indicateur donne : base (valeur et période), comparaison (référence), écart, sens. */
+  function pilotage() {
+    if (S._cache.pil) return S._cache.pil;
+    var P = S.data.params, dt = debt(), rv = revenusReguliers(), plan = S.data.plan || [];
+    var assur = 0;
+    S.data.echeances.forEach(function (e) { if (e.actif && e.sens !== 'Crédit' && e.cat === 'Assurance emprunteur') assur += e.montant / (BM.PERIODES[e.periodicite] || 1); });
+    var charges = BM.r2(dt.total + assur), seuil = (P.seuilEffort || 35) / 100;
+    function row(m) {
+      var x = M(m);
+      return { m: m, recReg: BM.r2(x.recReg), recExc: BM.r2(x.recExc), loan: BM.r2(x.loan), vie: BM.r2(x.dep - x.loan), proc: BM.r2(x.proc + Math.max(0, x.cca)),
+        travaux: BM.r2(x.proj - x.proc), epa: BM.r2(x.epa), struct: BM.r2(x.recReg - x.dep), apres: BM.r2(x.recReg - x.dep - x.proj - Math.max(0, x.cca)) };
+    }
+    var cur = BM.ym(S.today), last = BM.addMonths(cur, -1);
+    var serie = lastMonths(12).reverse().map(row);
+    var ms3 = lastMonths(3), prev3 = lastMonths(3, BM.addMonths(cur, -3));
+    function a3(k, list) { return BM.r2(avg((list || ms3).map(function (m) { return row(m)[k]; }))); }
+    // Liquidités et dette
+    var cour = 0, epa = 0, liqPlan = 0;
+    var planDate = P.planDate || '';
+    S.data.comptes.forEach(function (c) {
+      if (!c.actif) return;
+      var b = S.balances[c.nom] || 0;
+      if (c.nature === 'Épargne') epa += b; else cour += b;
+      if (planDate) liqPlan += BM.balanceAt(c, planDate, S.ops);
+    });
+    var liq = BM.r2(cour + epa); liqPlan = BM.r2(liqPlan);
+    var dette = dt.crd, dettePlan = P.planDette || null;
+    var netNow = BM.r2(liq - dette), netPlan = dettePlan != null && planDate ? BM.r2(liqPlan - dettePlan) : null;
+    var vieRef = P.plafondVie || 0, precM = P.precautionMois || 3;
+    var precMois = vieRef ? epa / vieRef : null;
+    var au = autonomy();
+    var I = {
+      effort: { v: rv.retenus ? charges / rv.retenus : null, base: charges, rev: rv.retenus, seuil: seuil, ecart: BM.r2(charges - seuil * rv.retenus) },
+      vie: { v: a3('vie'), last: row(last).vie, ref: vieRef, ecart: BM.r2(a3('vie') - vieRef) },
+      struct: { v: a3('struct'), prev: a3('struct', prev3), last: row(last).struct },
+      proc: { v: a3('proc'), prev: a3('proc', prev3), last: row(last).proc },
+      travaux: { v: a3('travaux') },
+      exc: { v: a3('recExc'), prev: a3('recExc', prev3), last: row(last).recExc },
+      apres: { v: a3('apres'), prev: a3('apres', prev3) },
+      dette: { v: dette, ref: dettePlan, ecart: dettePlan != null ? BM.r2(dette - dettePlan) : null, known: dt.crdKnown },
+      liq: { v: liq, cour: BM.r2(cour), epa: BM.r2(epa), ref: planDate ? liqPlan : null, ecart: planDate ? BM.r2(liq - liqPlan) : null },
+      net: { v: netNow, ref: netPlan, ecart: netPlan != null ? BM.r2(netNow - netPlan) : null },
+      prec: { v: precMois, cible: precM, montant: BM.r2(epa), manque: vieRef ? BM.r2(Math.max(0, precM * vieRef - epa)) : null },
+      auto: au
+    };
+    // Verdict : trois signaux, chacun vrai ou faux, sans note composite
+    var sig = [
+      { k: 'Patrimoine net (liquidités − dettes)', ok: I.net.ecart == null || S.today <= planDate ? null : I.net.ecart >= 0,
+        txt: I.net.ecart == null ? 'référence de départ absente' : S.today <= planDate ? 'point de départ posé le ' + dateLabel(planDate, true) + ' : ' + eur0(I.net.ref) + ' ; premier constat au prochain import' : (I.net.ecart >= 0 ? 'en hausse de ' : 'en baisse de ') + eur0(Math.abs(I.net.ecart)) + ' depuis le ' + dateLabel(planDate, true) + ' (' + eur0(I.net.v) + ')' },
+      { k: 'Le mois tient sur les revenus réguliers', ok: I.apres.v >= 0, txt: 'moyenne 3 mois : ' + sgn(I.apres.v, 0) + ' / mois (après procédure et travaux)' },
+      { k: 'Vie courante sous le plafond', ok: vieRef ? I.vie.v <= vieRef : null, txt: vieRef ? eur0(I.vie.v) + ' / mois pour un plafond de ' + eur0(vieRef) : 'plafond non défini' }
+    ];
+    var nOk = sig.filter(function (s) { return s.ok === true; }).length, nKo = sig.filter(function (s) { return s.ok === false; }).length;
+    var verdict = nKo === 0 && nOk ? 'good' : nOk === 0 ? 'bad' : 'warn';
+    // Leviers du plan : non clos, triés par gain mensuel visé décroissant
+    var open = plan.filter(function (a) { return ['Fait', 'Refusé', 'Abandonné', 'Utilisé'].indexOf(a.statut) === -1; })
+      .sort(function (a, b) { return (b.gain || 0) - (a.gain || 0); });
+    var gainOuvert = BM.r2(open.reduce(function (t, a) { return t + (a.gain || 0); }, 0));
+    var gainObtenu = BM.r2(plan.filter(function (a) { return a.statut === 'Fait'; }).reduce(function (t, a) { return t + (a.gain || 0); }, 0));
+    var res = { I: I, sig: sig, verdict: verdict, serie: serie, charges: charges, assur: BM.r2(assur), dt: dt, rv: rv, open: open, gainOuvert: gainOuvert, gainObtenu: gainObtenu, planDate: planDate,
+      dus: plan.filter(function (a) { return a.retour && a.retour <= S.today && ['Fait', 'Refusé', 'Abandonné'].indexOf(a.statut) === -1; }) };
+    S._cache.pil = res;
+    return res;
+  }
+  /** Ordre de remboursement des prêts conso : avalanche (taux) et boule de neige (CRD), pour comparer. */
+  function payoffOrder() {
+    var list = S.data.prets.filter(function (p) { var st = S.loanSt[p.id]; return st && st.restantMois !== 0 && p.cat !== 'Loyer / Crédit immobilier'; })
+      .map(function (p) { var st = S.loanSt[p.id]; return { p: p, crd: st.crd, taux: st.taux != null ? st.taux : p.taux, fin: st.fin, mois: st.restantMois }; });
+    return {
+      avalanche: list.slice().sort(function (a, b) { return (b.taux || 0) - (a.taux || 0); }),
+      neige: list.slice().sort(function (a, b) { return (a.crd == null ? 1e12 : a.crd) - (b.crd == null ? 1e12 : b.crd); })
+    };
   }
   /** Comparaison de 3 mois par groupe ; aDate = même quantième dans chaque mois. */
   function threeMonths(ref, aDate) {
@@ -576,6 +654,6 @@ var App = window.App = (function () {
     groupColor: groupColor, groupLabel: groupLabel, M: M, lastMonths: lastMonths, median: median, avg: avg, catHistory: catHistory, amt: amt,
     events: events, matchEvents: matchEvents, monthView: monthView, envelope: envelope, projection: projection, debt: debt, revenusReguliers: revenusReguliers,
     merchant: merchant, keywordFor: keywordFor, pretty: pretty, guessCats: guessCats, recurring: recurring, suggestions: suggestions, objective: objective,
-    applyCats: applyCats, addOps: addOps, loanCat: loanCat, autonomy: autonomy, threeMonths: threeMonths
+    applyCats: applyCats, addOps: addOps, loanCat: loanCat, autonomy: autonomy, threeMonths: threeMonths, pilotage: pilotage, payoffOrder: payoffOrder, LOAN_CATS: LOAN_CATS
   };
 })();

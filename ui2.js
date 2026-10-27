@@ -17,9 +17,9 @@ var UI2 = window.UI2 = (function () {
      ===================================================================== */
   var avenir = {
     html: function () {
-      var t = S.avTab || (S.avTab = 'treso');
-      var out = U().topbar('Avenir', 'Ce qui va se passer et où vous en êtes', seg([['treso', '🌊 Trésorerie'], ['prets', '🏦 Prêts'], ['echeances', '📅 Échéances'], ['objectifs', '🎯 Objectifs']], t, 'av'));
-      out += '<main class="content">' + ({ treso: treso, prets: prets, echeances: echeances, objectifs: objectifs }[t])() + '</main>';
+      var t = S.avTab || (S.avTab = 'pilotage');
+      var out = U().topbar('Avenir', 'Gagne-t-on du terrain, et que faire ensuite', seg([['pilotage', '🧭 Pilotage'], ['plan', '✅ Plan'], ['treso', '🌊 Trésorerie'], ['prets', '🏦 Prêts'], ['echeances', '📅 Échéances'], ['objectifs', '🎯 Objectifs']], t, 'av'));
+      out += '<main class="content">' + ({ pilotage: pilotage, plan: planView, treso: treso, prets: prets, echeances: echeances, objectifs: objectifs }[t] || pilotage)() + '</main>';
       return out;
     },
     mount: function () {
@@ -27,6 +27,9 @@ var UI2 = window.UI2 = (function () {
       U().bindCommon();
       if (S.avTab === 'treso') mountTreso();
       if (S.avTab === 'prets') mountPrets();
+      if (S.avTab === 'pilotage') mountPilotage();
+      $$('[data-plan]').forEach(function (b) { b.onclick = function () { planSheet(b.dataset.plan); }; });
+      $$('[data-avtab]').forEach(function (b) { b.onclick = function () { S.avTab = b.dataset.avtab; U().render(true); }; });
       $$('[data-ech]').forEach(function (b) { b.onclick = function () { echSheet(b.dataset.ech); }; });
       $$('[data-obj]').forEach(function (b) { b.onclick = function () { objSheet(b.dataset.obj); }; });
       $$('[data-pret]').forEach(function (b) { b.onclick = function () { loanSheet(b.dataset.pret); }; });
@@ -219,6 +222,158 @@ var UI2 = window.UI2 = (function () {
         U().run(ev.currentTarget, A.api('saveRow', { table: 'ECHEANCES', row: row, oldKey: e.id || null }), 'Échéance enregistrée').then(function (r) {
           var sv = r.row, i = S.data.echeances.findIndex(function (x) { return x.id === sv.id; });
           if (i >= 0) S.data.echeances[i] = sv; else S.data.echeances.push(sv);
+          A.recompute(); A.saveCache(); close(); U().render();
+        });
+      };
+    });
+  }
+
+
+  /* =====================================================================
+     PILOTAGE (v5) : chaque chiffre = base, comparaison, écart, sens
+     ===================================================================== */
+  function fmtM(v) { return v == null ? '–' : (v > 60 ? '+ de 5 ans' : v.toFixed(1).replace('.', ',') + ' mois'); }
+  /** Bloc indicateur : titre, valeur, puis 4 lignes Base / Comparaison / Écart / Ce que ça veut dire. */
+  function ind(o) {
+    return '<div class="ind ' + (o.cls || '') + '"><div class="ind-top"><span class="ind-k">' + o.k + '</span><b class="num ind-v ' + (o.cls || '') + '">' + o.v + '</b></div>' +
+      '<dl><dt>Base</dt><dd>' + o.base + '</dd><dt>Comparaison</dt><dd>' + o.comp + '</dd><dt>Écart</dt><dd class="' + (o.cls || '') + '">' + o.ecart + '</dd><dt>Sens</dt><dd>' + o.sens + '</dd></dl></div>';
+  }
+  function pilotage() {
+    var pl = A.pilotage(), I = pl.I, P = S.data.params, last = BM.addMonths(BM.ym(S.today), -1), ref = pl.planDate ? A.dateLabel(pl.planDate, true) : null;
+    var out = '';
+    // 1. Verdict
+    out += '<section class="card verdict ' + pl.verdict + '"><div class="card-head"><h2>Gagne-t-on du terrain ?</h2><span class="tag ' + pl.verdict + '">' + ({ good: 'Oui', warn: 'En partie', bad: 'Non, pas encore' })[pl.verdict] + '</span></div>' +
+      pl.sig.map(function (g) { return '<div class="sig"><span class="sig-i ' + (g.ok == null ? '' : g.ok ? 'good' : 'bad') + '">' + (g.ok == null ? '–' : g.ok ? '✓' : '✗') + '</span><div><b>' + esc(g.k) + '</b><div class="small ink2">' + esc(g.txt) + '</div></div></div>'; }).join('') +
+      '<p class="tiny muted mt8">Trois signaux simples et vérifiables, sans note composite. Point de départ du plan : ' + (ref || 'non défini (Réglages)') + '. « 3 mois » = moyenne des 3 derniers mois complets.</p></section>';
+    // 2. Indicateurs
+    var e = I.effort;
+    out += '<section class="card"><div class="card-head"><h2>Les chiffres qui comptent</h2></div>' +
+      ind({ k: "Taux d'effort (crédits)", v: e.v == null ? '–' : A.pct(e.v), cls: e.v > e.seuil ? 'bad' : 'good',
+        base: eur0(pl.charges) + ' de mensualités et assurance emprunteur ÷ ' + eur0(e.rev) + ' de revenus réguliers déclarés',
+        comp: 'norme bancaire HCSF : ' + Math.round(e.seuil * 100) + ' %',
+        ecart: e.ecart > 0 ? eur0(e.ecart) + ' / mois au-dessus du seuil' : 'sous le seuil',
+        sens: e.v > e.seuil ? 'Les banques ne prêteront plus sans baisse des mensualités : chaque euro gagné sur un crédit compte double.' : 'Endettement soutenable selon la norme.' }) +
+      ind({ k: 'Vie courante (hors crédits)', v: eur0(I.vie.v) + ' / mois', cls: I.vie.ref && I.vie.v > I.vie.ref ? 'warn' : 'good',
+        base: 'dépenses du foyer hors mensualités, moyenne 3 mois ; ' + A.monthLabel(last) + ' : ' + eur0(I.vie.last),
+        comp: I.vie.ref ? 'plafond fixé : ' + eur0(I.vie.ref) : 'aucun plafond fixé',
+        ecart: I.vie.ref ? A.sgn(I.vie.ecart, 0) + ' / mois' : '–',
+        sens: I.vie.ref && I.vie.ecart > 0 ? 'Le dépassement est le levier le plus rapide : il ne dépend que de vous.' : 'Le plafond est tenu.' }) +
+      ind({ k: 'Résultat structurel', v: A.sgn(I.struct.v, 0) + ' / mois', cls: I.struct.v < 0 ? 'bad' : 'good',
+        base: 'revenus réguliers − toutes les dépenses du foyer (crédits compris), moyenne 3 mois',
+        comp: '3 mois précédents : ' + A.sgn(I.struct.prev, 0),
+        ecart: A.sgn(BM.r2(I.struct.v - I.struct.prev), 0) + ' / mois',
+        sens: I.struct.v < 0 ? 'Le foyer dépense plus que ses revenus réguliers : la différence est prise sur l\'épargne ou sur des rentrées ponctuelles.' : 'Les revenus réguliers couvrent le train de vie.' }) +
+      ind({ k: 'Pharmacie et procédure', v: eur0(I.proc.v) + ' / mois', cls: I.proc.v > 0 ? 'warn' : 'good',
+        base: 'frais juridiques, avances et compte courant d\'associé, moyenne 3 mois ; ' + A.monthLabel(last) + ' : ' + eur0(I.proc.last),
+        comp: '3 mois précédents : ' + eur0(I.proc.prev) + ' ; cible : 0 € (sommes non récupérables pendant le redressement)',
+        ecart: A.sgn(BM.r2(I.proc.v - I.proc.prev), 0) + ' / mois',
+        sens: I.proc.v > 0 ? 'Chaque euro avancé à la société sort du budget du foyer sans retour possible à court terme.' : 'Plus d\'avance : le budget du foyer est protégé.' }) +
+      ind({ k: 'Rentrées ponctuelles', v: eur0(I.exc.v) + ' / mois', cls: I.exc.v > 0 && I.apres.v < 0 ? 'warn' : '',
+        base: 'versements, dons, dépôts non identifiés, moyenne 3 mois ; ' + A.monthLabel(last) + ' : ' + eur0(I.exc.last),
+        comp: '3 mois précédents : ' + eur0(I.exc.prev),
+        ecart: A.sgn(BM.r2(I.exc.v - I.exc.prev), 0) + ' / mois',
+        sens: 'Ces sommes ne sont pas garanties : le budget ne doit pas en dépendre.' }) +
+      ind({ k: 'Dette totale (capital restant dû)', v: eur0(I.dette.v), cls: I.dette.ecart != null && I.dette.ecart < 0 ? 'good' : '',
+        base: 'somme des capitaux restant dus des prêts en cours' + (I.dette.known ? '' : ' (un CRD manque)'),
+        comp: I.dette.ref != null ? 'au départ du plan (' + ref + ') : ' + eur0(I.dette.ref) : 'référence absente',
+        ecart: I.dette.ecart != null ? A.sgn(I.dette.ecart, 0) : '–',
+        sens: 'Baisse mécanique par les mensualités ; elle n\'est un vrai progrès que si les liquidités tiennent en même temps.' }) +
+      ind({ k: 'Liquidités (comptes + livrets)', v: eur0(I.liq.v), cls: I.liq.ecart != null && I.liq.ecart < 0 ? 'warn' : 'good',
+        base: 'comptes courants ' + eur0(I.liq.cour) + ' + épargne ' + eur0(I.liq.epa),
+        comp: I.liq.ref != null ? 'au ' + ref + ' : ' + eur0(I.liq.ref) : 'référence absente',
+        ecart: I.liq.ecart != null ? A.sgn(I.liq.ecart, 0) : '–',
+        sens: 'Ce qui reste pour absorber un imprévu.' }) +
+      ind({ k: 'Épargne de précaution', v: fmtM(I.prec.v), cls: I.prec.v != null && I.prec.v < I.prec.cible ? 'warn' : 'good',
+        base: 'livrets ' + eur0(I.prec.montant) + ' ÷ plafond de vie courante ' + eur0(P.plafondVie || 0),
+        comp: 'cible : ' + I.prec.cible + ' mois',
+        ecart: I.prec.manque ? 'il manque ' + eur0(I.prec.manque) : 'cible atteinte',
+        sens: 'Matelas recommandé de 3 à 6 mois de dépenses avant tout remboursement anticipé.' }) +
+      ind({ k: 'Autonomie', v: I.auto.mois == null ? 'à l\'équilibre' : fmtM(I.auto.mois), cls: I.auto.mois != null && I.auto.mois < 6 ? 'bad' : I.auto.mois != null && I.auto.mois < 12 ? 'warn' : 'good',
+        base: 'liquidités ' + eur0(I.auto.patrimoine) + ' ÷ déficit habituel ' + eur0(Math.max(0, -I.auto.deficit)) + ' / mois',
+        comp: 'déficit = revenus réguliers ' + eur0(I.auto.socle) + ' − sorties ' + eur0(I.auto.sorties) + ' (moyenne 3 mois, épargne exclue)',
+        ecart: A.sgn(I.auto.deficit, 0) + ' / mois',
+        sens: I.auto.mois == null ? 'Pas de déficit : les réserves ne baissent pas.' : 'Temps avant épuisement des réserves si rien ne change et sans rentrée ponctuelle.' }) +
+      '</section>';
+    // 3. Tendance 12 mois
+    out += '<section class="card"><div class="card-head"><h2>12 derniers mois</h2></div><div id="c-pil"></div>' +
+      '<div class="legend-row"><span><i style="background:var(--s1)"></i>Revenus réguliers</span><span><i style="background:var(--s2)"></i>Dépenses du foyer</span></div><p class="tiny muted">L\'écart entre les deux courbes est le résultat structurel. Les montants de procédure, très irréguliers, sont dans le tableau.</p>' +
+      '<table class="tbl mt8 tbl-tight"><thead><tr><th>Mois</th><th class="r">Résultat</th><th class="r">Procédure</th><th class="r">Ponctuel</th></tr></thead><tbody>' +
+      pl.serie.slice().reverse().map(function (r) { return '<tr><td>' + A.monthLabel(r.m) + '</td><td class="r ' + (r.struct < 0 ? 'bad' : 'good') + '">' + A.sgn(r.struct, 0) + '</td><td class="r">' + eur0(r.proc) + '</td><td class="r">' + eur0(r.recExc) + '</td></tr>'; }).join('') +
+      '</tbody></table><p class="tiny muted">Résultat = revenus réguliers − dépenses du foyer (crédits compris). Procédure et travaux sont à part.</p></section>';
+    // 4. Leviers
+    out += '<section class="card"><div class="card-head"><h2>Leviers en cours</h2><button class="link" data-avtab="plan">Plan complet ›</button></div>' +
+      '<p class="small ink2">Gain mensuel visé encore ouvert : <b>' + eur0(pl.gainOuvert) + '</b>' + (pl.gainObtenu ? ' · déjà obtenu : <b class="good">' + eur0(pl.gainObtenu) + '</b>' : '') + '</p>' +
+      (pl.dus.length ? '<p class="small warn">⏰ ' + pl.dus.length + ' point' + (pl.dus.length > 1 ? 's' : '') + ' de retour à faire : ' + pl.dus.map(function (a) { return esc(a.id); }).join(', ') + '</p>' : '') +
+      pl.open.slice(0, 5).map(planRow).join('') + '</section>';
+    // 5. Ordre de remboursement
+    var po = A.payoffOrder();
+    if (po.avalanche.length) out += '<section class="card"><div class="card-head"><h2>Si un euro de plus se libère : quel crédit d\'abord ?</h2></div>' +
+      '<div class="grid2"><div><h3>Par taux (avalanche)</h3><ol class="small">' + po.avalanche.map(function (x) { return '<li>' + esc(x.p.nom.replace(/^Prêt n° \d+ — /, '')) + ' · ' + (x.taux == null ? '?' : String(x.taux).replace('.', ',') + ' %') + '</li>'; }).join('') + '</ol></div>' +
+      '<div><h3>Par solde (boule de neige)</h3><ol class="small">' + po.neige.map(function (x) { return '<li>' + esc(x.p.nom.replace(/^Prêt n° \d+ — /, '')) + ' · ' + (x.crd == null ? '?' : eur0(x.crd)) + '</li>'; }).join('') + '</ol></div></div>' +
+      '<p class="tiny muted">L\'avalanche coûte le moins d\'intérêts ; la boule de neige solde plus vite un premier crédit et libère une mensualité entière. Uniquement après l\'épargne de précaution. Remboursement anticipé d\'un crédit conso : indemnité nulle sous 10 000 € remboursés sur 12 mois, sinon 1 % maximum (0,5 % s\'il reste moins d\'un an).</p></section>';
+    // 6. Recours
+    out += '<section class="card"><div class="card-head"><h2>Où se faire aider (gratuit)</h2></div>' +
+      '<div class="small"><p><b>Point conseil budget</b> : accompagnement budgétaire gratuit et confidentiel, y compris négociation avec les créanciers. Liste sur mesquestionsdargent.fr.</p>' +
+      '<p><b>Banque de France</b> : dossier de surendettement si les dettes ne peuvent plus être payées. Recours de dernier ressort : inscription au fichier FICP et plan imposé.</p>' +
+      '<p><b>Votre conseiller bancaire</b> : modulation, report d\'échéances, allongement. Toujours demander par écrit et noter la réponse dans le Plan.</p></div></section>';
+    return out;
+  }
+  function mountPilotage() {
+    var pl = A.pilotage(), h = $('#c-pil'); if (!h) return;
+    Charts.line(h, { labels: pl.serie.map(function (r) { return r.m; }), height: 200, fmt: eur0, xfmt: function (m) { return m.slice(5); }, tipLabel: function (m) { return A.monthLabel(m); },
+      series: [{ name: 'Revenus réguliers', color: 'var(--s1)', values: pl.serie.map(function (r) { return r.recReg; }) },
+        { name: 'Dépenses du foyer', color: 'var(--s2)', values: pl.serie.map(function (r) { return BM.r2(r.vie + r.loan); }) }
+      ], aria: 'Revenus réguliers et dépenses du foyer sur 12 mois' });
+  }
+
+  /* =====================================================================
+     PLAN D'ACTIONS (onglet PLAN du classeur)
+     ===================================================================== */
+  var PLAN_ST = ['À faire', 'En cours', 'Fait', 'Refusé', 'Utilisé', 'Disponible', 'Abandonné'];
+  function stCls(st) { return { 'Fait': 'good', 'En cours': 'warn', 'À faire': '', 'Refusé': 'bad', 'Abandonné': 'muted', 'Utilisé': 'muted', 'Disponible': 'good' }[st] || ''; }
+  function planRow(a) {
+    var late = a.retour && a.retour <= S.today && ['Fait', 'Refusé', 'Abandonné'].indexOf(a.statut) === -1;
+    return '<div class="env" data-plan="' + esc(a.id) + '" style="cursor:pointer"><div class="top"><div class="name"><span class="tiny muted">' + esc(a.id) + '</span><span>' + esc(a.levier) + '</span></div>' +
+      '<b class="num">' + (a.gain ? eur0(a.gain) + '/mois' : '') + '</b></div>' +
+      '<div class="sub"><span><span class="tag ' + stCls(a.statut) + '">' + esc(a.statut) + '</span> ' + esc(a.qui || '') + '</span><span class="' + (late ? 'warn' : '') + '">' + (a.retour ? (late ? '⏰ ' : '') + 'retour ' + A.dateLabel(a.retour, true) : '') + '</span></div>' +
+      (a.prochaine ? '<div class="small ink2 mt8">➜ ' + esc(a.prochaine) + '</div>' : '') +
+      (a.resultat ? '<div class="small good mt8">Résultat : ' + esc(a.resultat) + '</div>' : '') + '</div>';
+  }
+  function planView() {
+    var plan = (S.data.plan || []).slice(), pl = A.pilotage();
+    var order = function (a) { return { 'En cours': 0, 'À faire': 1, 'Disponible': 2, 'Fait': 3, 'Utilisé': 4, 'Refusé': 5, 'Abandonné': 6 }[a.statut]; };
+    plan.sort(function (a, b) { return (order(a) - order(b)) || ((b.gain || 0) - (a.gain || 0)); });
+    return '<section class="card"><div class="card-head"><h2>Plan d\'actions</h2><button class="btn sm" data-plan="">＋ Action</button></div>' +
+      '<div class="tiles t3">' + U().tile('Gain visé ouvert', eur0(pl.gainOuvert), 'par mois, actions non closes') + U().tile('Gain obtenu', eur0(pl.gainObtenu), 'actions « Fait »', pl.gainObtenu ? 'good' : '') +
+      U().tile('Points de retour dus', String(pl.dus.length), pl.dus.length ? 'à mettre à jour' : 'rien en retard', pl.dus.length ? 'warn' : 'good') + '</div>' +
+      '<p class="small ink2 mt8">Chaque action a un point de retour daté : on y note ce qui a été obtenu (avant / après), puis on passe au statut Fait, Refusé ou Abandonné.</p>' +
+      (plan.length ? plan.map(planRow).join('') : '<p class="empty">Aucune action. L\'onglet PLAN du classeur est vide.</p>') + '</section>';
+  }
+  function planSheet(id) {
+    var a = (S.data.plan || []).filter(function (x) { return x.id === id; })[0], isNew = !a;
+    a = a || { id: '', levier: '', gain: 0, qui: '', statut: 'À faire', derniere: '', prochaine: '', retour: '', resultat: '', comm: '' };
+    function f(label, idn, val, type) { return '<div class="field"><label>' + label + '</label><input class="input" id="' + idn + '" ' + (type ? 'type="' + type + '"' : 'inputmode="decimal"') + ' value="' + esc(val == null ? '' : val) + '"></div>'; }
+    function t(label, idn, val) { return '<div class="field"><label>' + label + '</label><textarea class="input" id="' + idn + '" rows="2">' + esc(val || '') + '</textarea></div>'; }
+    U().openSheet('<h2>' + (isNew ? 'Nouvelle action' : esc(a.id) + ' · ' + esc(a.levier)) + '</h2>' +
+      f('Levier', 'lv', a.levier, 'text') + '<div class="grid2">' + f('Gain mensuel visé (€)', 'gn', a.gain || '') + f('Interlocuteur', 'qui', a.qui, 'text') + '</div>' +
+      '<div class="grid2"><div class="field"><label>Statut</label><select class="input" id="st">' + PLAN_ST.map(function (s) { return '<option' + (s === a.statut ? ' selected' : '') + '>' + s + '</option>'; }).join('') + '</select></div>' +
+      f('Date du point de retour', 'rt', a.retour, 'date') + '</div>' +
+      f('Dernière démarche (date)', 'dd', a.derniere, 'date') + t('Prochaine étape', 'pe', a.prochaine) + t('Résultat constaté (avant → après)', 'rs', a.resultat) + t('Commentaire', 'cm', a.comm) +
+      '<div class="acts">' + (isNew ? '' : '<button class="btn danger" id="del" style="flex:0 0 auto">🗑</button>') + '<button class="btn ghost" data-close>Annuler</button><button class="btn" id="sv">Enregistrer</button></div>', function (sh, close) {
+      var del = $('#del', sh);
+      if (del) del.onclick = function () {
+        U().confirmSheet('Supprimer ' + a.id + ' ?', 'L\'action et son historique seront retirés de l\'onglet PLAN. Pour garder la trace, préférez le statut « Abandonné ».', 'Supprimer', true).then(function (ok) {
+          if (!ok) return;
+          U().run(null, A.api('deleteRow', { table: 'PLAN', key: a.id }), 'Action supprimée').then(function () { S.data.plan = S.data.plan.filter(function (x) { return x.id !== a.id; }); A.recompute(); A.saveCache(); U().render(); });
+        });
+      };
+      $('#sv', sh).onclick = function (ev) {
+        var row = { id: a.id, levier: $('#lv', sh).value.trim(), gain: BM.toNum($('#gn', sh).value || '0') || 0, qui: $('#qui', sh).value.trim(), statut: $('#st', sh).value,
+          derniere: $('#dd', sh).value, prochaine: $('#pe', sh).value.trim(), retour: $('#rt', sh).value, resultat: $('#rs', sh).value.trim(), comm: $('#cm', sh).value.trim() };
+        if (!row.levier) { U().toast('Le levier est obligatoire.'); return; }
+        U().run(ev.currentTarget, A.api('saveRow', { table: 'PLAN', row: row, oldKey: a.id || null }), 'Action enregistrée').then(function (r) {
+          var sv = r.row, list = S.data.plan || (S.data.plan = []), i = list.findIndex(function (x) { return x.id === sv.id; });
+          if (i >= 0) list[i] = sv; else list.push(sv);
           A.recompute(); A.saveCache(); close(); U().render();
         });
       };
@@ -665,6 +820,8 @@ var UI2 = window.UI2 = (function () {
       '<div class="grid2"><div class="field"><label>Nom du foyer</label><input class="input" id="p-foyer" value="' + esc(P.foyer) + '"></div><div class="field"><label>Jour de bascule au mois suivant</label><input class="input" id="p-jourBascule" inputmode="numeric" value="' + P.jourBascule + '"></div></div>' +
       '<div class="grid2"><div class="field"><label>Seuil d\'alerte reste à vivre (€)</label><input class="input" id="p-seuilRAV" inputmode="decimal" value="' + P.seuilRAV + '"></div><div class="field"><label>Seuil taux d\'effort (%)</label><input class="input" id="p-seuilEffort" inputmode="decimal" value="' + P.seuilEffort + '"></div></div>' +
       '<div class="grid2"><div class="field"><label>Coussin par compte (€)</label><input class="input" id="p-coussin" inputmode="decimal" value="' + P.coussin + '"></div><div class="field"><label>Horizon de projection (jours)</label><input class="input" id="p-horizon" inputmode="numeric" value="' + P.horizon + '"></div></div>' +
+      '<div class="grid2"><div class="field"><label>Plafond vie courante (€ / mois)</label><input class="input" id="p-plafondVie" inputmode="decimal" value="' + (P.plafondVie || '') + '"></div><div class="field"><label>Épargne de précaution visée (mois)</label><input class="input" id="p-precautionMois" inputmode="decimal" value="' + (P.precautionMois || 3) + '"></div></div>' +
+      '<p class="tiny muted">Départ du plan : ' + (P.planDate ? A.dateLabel(P.planDate, true) : 'non défini') + ' · dette ' + eur0(P.planDette || 0) + ' · épargne ' + eur0(P.planEpargne || 0) + ' (modifiable dans l\'onglet PARAMETRES du classeur).</p>' +
       '<button class="btn mt12" id="psave">Enregistrer les paramètres</button></section>';
     out += '<section class="card"><div class="card-head"><h2>Catégories et enveloppes</h2><button class="btn sm" id="addk">＋ Catégorie</button></div><input class="input" id="kq" placeholder="Filtrer…"><div id="klist" class="mt8">' +
       S.data.categories.map(function (c) { return '<div class="op" data-k="' + esc(c.nom) + '"><div class="av">' + (c.icone || '📦') + '</div><div class="grow"><div class="l1">' + esc(c.nom) + '</div><div class="l2">' + esc(A.groupLabel(c.groupe)) + ' · ' + esc(c.type) + ' · ' + esc(c.nature) + (c.rattache ? ' · bascule' : '') + '</div></div><div class="mt num">' + (c.enveloppe ? eur0(c.enveloppe) : '–') + '</div></div>'; }).join('') + '</div></section>';
@@ -687,7 +844,7 @@ var UI2 = window.UI2 = (function () {
   function mountReglages() {
     if (S.data.restreint) { $$('#theme button').forEach(function (b) { b.onclick = function () { A.LS.set('theme', b.dataset.t); App.applyTheme(); U().render(); }; }); $('#logout').onclick = function () { App.logout(); }; return; }
     $('#psave').onclick = function (ev) {
-      var p = {}; ['foyer', 'jourBascule', 'seuilRAV', 'seuilEffort', 'coussin', 'horizon'].forEach(function (k) { var v = $('#p-' + k).value; p[k] = k === 'foyer' ? v : BM.toNum(v); });
+      var p = {}; ['foyer', 'jourBascule', 'seuilRAV', 'seuilEffort', 'coussin', 'horizon', 'plafondVie', 'precautionMois'].forEach(function (k) { var v = $('#p-' + k).value; p[k] = k === 'foyer' ? v : BM.toNum(v); });
       if (!(p.jourBascule >= 1 && p.jourBascule <= 31)) { U().toast('Jour de bascule entre 1 et 31.'); return; }
       U().run(ev.currentTarget, A.api('saveParams', { params: p }), 'Paramètres enregistrés').then(function () { Object.assign(S.data.params, p); A.load(S.data); A.saveCache(); U().render(); });
     };

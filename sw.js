@@ -1,6 +1,6 @@
 /* Budget Maison — service worker : l'application s'ouvre même hors connexion (données du dernier passage). */
-var CACHE = 'bm-4.1.2';
-var FILES = ['./', 'index.html', 'styles.css?v=4.1.0', 'config.js?v=4.1.0', 'engine.js?v=4.1.0', 'importer.js?v=4.1.0', 'charts.js?v=4.1.0', 'core.js?v=4.1.0', 'ui.js?v=4.1.2', 'ui2.js?v=4.1.2', 'app.js?v=4.1.0',
+var CACHE = 'bm-5.0.0';
+var FILES = ['./', 'index.html', 'styles.css?v=5.0.0', 'config.js?v=5.0.0', 'engine.js?v=5.0.0', 'importer.js?v=5.0.0', 'charts.js?v=5.0.0', 'core.js?v=5.0.0', 'ui.js?v=5.0.0', 'ui2.js?v=5.0.0', 'app.js?v=5.0.0',
   'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 self.addEventListener('install', function (e) { e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES); }).then(function () { return self.skipWaiting(); })); });
 self.addEventListener('activate', function (e) {
